@@ -1,0 +1,244 @@
+<app-root>
+  <div id="loading-screen" class="loading-screen">
+    <h1>E-learning loading</h1>
+    <div class="progress-bar-container">
+      <div id="progress-bar" class="progress-bar"></div>
+    </div>
+    <div id="progress-percentage" class="progress-percentage">0%</div>
+  </div>  
+  <style>
+    .loading-screen {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-color: #fff;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+    .progress-bar-container {
+      width: 80%;
+      max-width: 600px;
+      height: 20px;
+      background-color: #e0e0e0;
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .progress-bar {
+      width: 0;
+      height: 100%;
+      background-color: #4caf50;
+      transition: width 0.3s ease;
+    }
+    .progress-percentage {
+      margin-top: 10px;
+      font-size: 24px;
+      font-weight: bold;
+    }
+  </style>
+  <script>
+    (function() {
+      // Prevent duplicate initialization
+      if (window.loadingScreenInitialized) return;
+      window.loadingScreenInitialized = true;
+      
+      // Configuration constants
+      const CONFIG = {
+        resourceTypes: ['script', 'link[rel="stylesheet"]'],
+        transitionDuration: 300,
+        minimumDisplayTime: 500,
+        fallbackTimeout: 10000
+      };
+      
+      // Elements cache
+      const elements = {
+        screen: document.getElementById('loading-screen'),
+        progressBar: document.getElementById('progress-bar'),
+        progressText: document.getElementById('progress-percentage')
+      };
+      
+      // State tracking
+      const state = {
+        totalSize: 0,
+        loadedSize: 0,
+        resourcesCount: 0,
+        loadedCount: 0,
+        startTime: performance.now(),
+        allResourcesPromise: null
+      };
+      
+      /**
+       * Safely get resources from the document
+       * @returns {Array} Array of script and stylesheet elements
+       */
+      function getResources() {
+        const resources = [];
+        
+        CONFIG.resourceTypes.forEach(selector => {
+          try {
+            const elements = document.querySelectorAll(selector);
+            resources.push(...Array.from(elements));
+          } catch (error) {
+            console.error(`Error selecting resources with ${selector}:`, error);
+          }
+        });
+        
+        return resources;
+      }
+      
+      /**
+       * Safely fetch a resource's size using HEAD request
+       * @param {Element} resource - The script or link element
+       * @returns {Promise<number>} Promise resolving to the resource size
+       */
+      function fetchResourceSize(resource) {
+        return new Promise(resolve => {
+          const url = resource.src || resource.href;
+          
+          if (!url) {
+            resolve(0);
+            return;
+          }
+          
+          try {
+            const xhr = new XMLHttpRequest();
+            xhr.open('HEAD', url, true);
+            xhr.timeout = 3000; // 3 second timeout
+            
+            xhr.onload = () => {
+              if (xhr.status === 200) {
+                const contentLength = xhr.getResponseHeader('Content-Length');
+                resolve(contentLength ? parseInt(contentLength, 10) : 1000); // Default size if not provided
+              } else {
+                resolve(1000); // Fallback size for failed requests
+              }
+            };
+            
+            xhr.ontimeout = xhr.onerror = () => resolve(1000);
+            xhr.send();
+          } catch (error) {
+            resolve(1000); // Fallback size for exceptions
+          }
+        });
+      }
+      
+      /**
+       * Update the loading progress UI
+       * @param {number} size - The size of the loaded resource
+       */
+      function updateProgress(size) {
+        state.loadedCount++;
+        state.loadedSize += size || 0;
+        
+        // Calculate percentage, ensuring it doesn't exceed 100%
+        const percentage = Math.min(
+          100,
+          state.totalSize > 0 
+            ? Math.round((state.loadedSize / state.totalSize) * 100)
+            : Math.round((state.loadedCount / state.resourcesCount) * 100)
+        );
+        
+        // Update UI
+        elements.progressBar.style.width = `${percentage}%`;
+        elements.progressText.textContent = `${percentage}%`;
+        
+        // Check if loading is complete - intentionally not hiding, as app-root will be replaced
+        if (state.loadedCount >= state.resourcesCount) {
+          // Ensure progress shows 100% when complete
+          elements.progressBar.style.width = '100%';
+          elements.progressText.textContent = '100%';
+        }
+      }
+      
+      /**
+       * Track the loading of a resource
+       * @param {Element} resource - The resource element to track
+       * @param {number} size - The size of the resource
+       */
+      function trackResource(resource, size) {
+        // For scripts
+        if (resource.tagName.toLowerCase() === 'script' && resource.src) {
+          const script = document.createElement('script');
+          script.src = resource.src;
+          
+          // Copy relevant attributes
+          if (resource.async) script.async = true;
+          if (resource.defer) script.defer = true;
+          if (resource.type) script.type = resource.type;
+          
+          script.onload = () => updateProgress(size);
+          script.onerror = () => updateProgress(0);
+          
+          document.head.appendChild(script);
+        }
+        // For stylesheets
+        else if (resource.tagName.toLowerCase() === 'link' && resource.href) {
+          const link = document.createElement('link');
+          link.rel = 'stylesheet';
+          link.href = resource.href;
+          
+          link.onload = () => updateProgress(size);
+          link.onerror = () => updateProgress(0);
+          
+          document.head.appendChild(link);
+        }
+        // For inline scripts or other resources
+        else {
+          updateProgress(size);
+        }
+      }
+      
+      /**
+       * Initialize the loading screen
+       */
+      function init() {
+        // Get all resources
+        const resources = getResources();
+        state.resourcesCount = resources.length;
+        
+        // Set fallback timeout
+        const fallbackTimer = setTimeout(() => {
+          console.warn('Loading screen fallback timeout triggered');
+          // Show 100% even on timeout
+          elements.progressBar.style.width = '100%';
+          elements.progressText.textContent = '100%';
+        }, CONFIG.fallbackTimeout);
+        
+        // If there are no resources, show 100% immediately
+        if (resources.length === 0) {
+          elements.progressBar.style.width = '100%';
+          elements.progressText.textContent = '100%';
+          clearTimeout(fallbackTimer);
+          return;
+        }
+        
+        // Fetch all resource sizes
+        state.allResourcesPromise = Promise.all(resources.map(fetchResourceSize))
+          .then(sizes => {
+            state.totalSize = sizes.reduce((acc, size) => acc + size, 0);
+            
+            // Track each resource
+            resources.forEach((resource, index) => {
+              trackResource(resource, sizes[index]);
+            });
+            
+            clearTimeout(fallbackTimer);
+          })
+          .catch(error => {
+            console.error('Error during resource size fetching:', error);
+            // Show 100% on error
+            elements.progressBar.style.width = '100%';
+            elements.progressText.textContent = '100%';
+            clearTimeout(fallbackTimer);
+          });
+      }
+      
+      // Start the loading process
+      init();
+    })();
+  </script>
+</app-root>
